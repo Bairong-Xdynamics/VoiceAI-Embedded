@@ -104,9 +104,10 @@ private:
     void InitializeButtons() {
         boot_button_.OnClick([this]() {
             auto& app = Application::GetInstance();
-            if (app.GetDeviceState() == kDeviceStateStarting && !WifiStation::GetInstance().IsConnected()) {
+            ESP_LOGI(TAG, "boot_button OnClick");
+            //if (app.GetDeviceState() == kDeviceStateStarting && !WifiStation::GetInstance().IsConnected()) {
                 ResetWifiConfiguration();
-            }
+            //}
             app.ToggleChatState();
         });
         touch_button_.OnPressDown([this]() {
