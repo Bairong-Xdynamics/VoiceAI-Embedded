@@ -21,9 +21,10 @@
 
 class RtcProtocol : public Protocol {
 public:
-    RtcProtocol(const std::string& robot_key, const std::string& robot_token);
+    RtcProtocol(const std::string& robot_key, const std::string& robot_token, const std::string& model_config);
     ~RtcProtocol();
 
+    void SetNetWorkUrl(const std::string& config_url) override;
     bool Start() override;
     bool SendAudio(std::unique_ptr<AudioStreamPacket> packet) override;
     bool OpenAudioChannel() override;
@@ -49,9 +50,15 @@ private:
     uint32_t conn_id_;
     int data_stream_id_;
     bool join_success_;
+    bool first_outgoing_audio_logged_ = false;
+    bool first_incoming_audio_logged_ = false;
+    std::chrono::time_point<std::chrono::steady_clock> first_outgoing_audio_time_;
+    bool closing_ = false;
 
     std::string robot_key_;
     std::string robot_token_;
+    std::string model_config_;
+    std::string network_url_;
     std::string room_name_;
     std::string voice_user_name_;
 };

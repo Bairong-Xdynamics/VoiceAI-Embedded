@@ -3,14 +3,14 @@
 #include "twilio_protocol.h"
 
 #include <cstring>
+#include <cinttypes>
 #include <cJSON.h>
 #include <esp_log.h>
 #include <arpa/inet.h>
 #include <mbedtls/base64.h>
 #include <memory>
 
-#define TAG "TW" 
-#define TWILIO_WEBSOCKET_URL "wss://www.cybotstar.cn/api/realtime/calls/v1/beta/dialog"
+#define TAG "TW"
 
 static std::string GetMacAddress() {
     uint8_t mac[6];
@@ -80,15 +80,20 @@ static std::vector<uint8_t> Base64Decode(const std::string& input)
     return out;
 }
 
-TwilioProtocol::TwilioProtocol(const std::string& robot_key, const std::string& robot_token) {
+TwilioProtocol::TwilioProtocol(const std::string& robot_key, const std::string& robot_token, const std::string& model_config) {
     event_group_handle_ = xEventGroupCreate();  
     robot_key_ = robot_key;
     robot_token_ = robot_token;
+    model_config_ = model_config;
 }
 
 TwilioProtocol::~TwilioProtocol() {
-    CloseAudioChannel();
+    //CloseAudioChannel();
     vEventGroupDelete(event_group_handle_);
+}
+
+void TwilioProtocol::SetNetWorkUrl(const std::string& config_url) {
+    network_url_ = config_url;
 }
 
 bool TwilioProtocol::Start() {
@@ -138,27 +143,59 @@ bool TwilioProtocol::SendText(const std::string& text) {
 }
 
 bool TwilioProtocol::IsAudioChannelOpened() const {
-    return websocket_ != nullptr && websocket_->IsConnected() && !error_occurred_ && !IsTimeout();
+    return websocket_ != nullptr && websocket_->IsConnected() && !error_occurred_ /*&& !IsTimeout()*/;
+}
+
+void TwilioProtocol::NotifyAudioChannelClosed() {
+    if (!audio_channel_active_) {
+        return;
+    }
+    audio_channel_active_ = false;
+    first_outgoing_audio_logged_ = false;
+    first_incoming_audio_logged_ = false;
+    if (on_audio_channel_closed_ != nullptr) {
+        on_audio_channel_closed_();
+    }
 }
 
 void TwilioProtocol::CloseAudioChannel() {
     websocket_.reset();
     esp_network_.reset();
+    NotifyAudioChannelClosed();
 }
 
 bool TwilioProtocol::OpenAudioChannel() {
+    if (network_url_.empty()) {
+        ESP_LOGE(TAG, "Network URL is not set");
+        SetError("网络地址未设置");
+        return false;
+    }
 
-    std::string url = std::string(TWILIO_WEBSOCKET_URL) + "?a=a&agentName=webcall_agent&robotKey=" + UrlEncode(robot_key_) + "&robotToken=" + UrlEncode(robot_token_);
+    audio_channel_active_ = false;
+
+    std::string url = network_url_ + "?a=a&agentName=webcall_agent&robotKey=" + UrlEncode(robot_key_) + "&robotToken=" + UrlEncode(robot_token_) + "&userName=" + GetMacAddress().c_str();
     //std::string url = "ws://172.16.184.46:8765";
     std::string token = "";
     version_ = 0;
     error_occurred_ = false;
+    first_outgoing_audio_logged_ = false;
+    first_incoming_audio_logged_ = false;
     last_incoming_time_ = std::chrono::steady_clock::now();
+    if (!first_outgoing_audio_logged_) {
+        first_outgoing_audio_time_ = std::chrono::steady_clock::now();
+        if (on_log_message_ != nullptr) {
+            on_log_message_("info", "首次上行音频已发送", "语音协议", "设备首次向服务端发送音频数据");
+        }
+        first_outgoing_audio_logged_ = true;
+    }
 
     esp_network_ = std::make_unique<EspNetwork>();
     websocket_ = esp_network_->CreateWebSocket(1);
     if (websocket_ == nullptr) {
         ESP_LOGE(TAG, "Failed to create websocket");
+        if (on_log_message_ != nullptr) {
+            on_log_message_("error", "创建WebSocket失败", "语音协议", "无法创建WebSocket连接实例");
+        }
         esp_network_.reset();
         return false;
     }
@@ -183,8 +220,8 @@ bool TwilioProtocol::OpenAudioChannel() {
             auto root = cJSON_Parse(data);
             auto event = cJSON_GetObjectItem(root, "event");
             if (event != NULL) {
-                ParseTwilioMedia(root); 
-            } 
+                ParseTwilioMedia(root);
+            }
             cJSON_Delete(root);
         }
         last_incoming_time_ = std::chrono::steady_clock::now();
@@ -192,15 +229,16 @@ bool TwilioProtocol::OpenAudioChannel() {
 
     websocket_->OnDisconnected([this]() {
         ESP_LOGI(TAG, "Websocket disconnected");
-        if (on_audio_channel_closed_ != nullptr) {
-            on_audio_channel_closed_();
-        }
+        NotifyAudioChannelClosed();
     });
 
     ESP_LOGI(TAG, "Connecting to websocket server: %s with version: %d", url.c_str(), version_);
     if (!websocket_->Connect(url.c_str())) {
         ESP_LOGE(TAG, "Failed to connect to websocket server, code=%d", websocket_->GetLastError());
-        SetError("Failed to connect to websocket server");
+        if (on_log_message_ != nullptr) {
+            on_log_message_("error", "连接WebSocket服务器失败", "语音协议", "无法连接到语音协议服务端");
+        }
+        SetError("连接WebSocket服务器失败");
         return false;
     }
 
@@ -220,8 +258,9 @@ bool TwilioProtocol::OpenAudioChannel() {
     start_msg += "\"sampleRate\":" + std::to_string(16000) + ",";
     start_msg += "\"channels\":1";
     start_msg += "}";
-    start_msg += "},";
-    start_msg += "\"streamSid\":\"" + GetMacAddress() + "\"";
+    start_msg += ",";
+    start_msg += "\"config\": " + model_config_;
+    start_msg += "}";
     start_msg += "}";
 
     ESP_LOGI(TAG, "🔊 sent event start msg : %s", start_msg.c_str());
@@ -230,16 +269,20 @@ bool TwilioProtocol::OpenAudioChannel() {
         return false;
     }
 
+    audio_channel_active_ = true;
     if (on_audio_channel_opened_ != nullptr) {
         on_audio_channel_opened_();
+    }
+    if (on_log_message_ != nullptr) {
+        on_log_message_("info", "WebSocket连接成功", "语音协议", "语音通道建立完成");
     }
 
     return true;
 }
 
 bool TwilioProtocol::SendTwilioMedia(const uint8_t* pcm, size_t len)
-{    
-    /*
+{
+        /*
     // 打印前 16 字节，避免日志过长
     size_t print_len = len < 16 ? len : 16;
     char buf[3 * 16 + 1] = {0}; // 每个字节 2 位 + 空格
@@ -266,8 +309,16 @@ bool TwilioProtocol::SendTwilioMedia(const uint8_t* pcm, size_t len)
     sequence_++;
     chunk_++;
 
-    //ESP_LOGI(TAG, "🔊 sent %d bytes audio, payload size: %d, msg : %s", len, payload.size(), msg.c_str());
     return SendText(msg);
+    //const bool ok = SendText(msg);
+    //if (ok && !first_outgoing_audio_logged_) {
+    //    first_outgoing_audio_time_ = std::chrono::steady_clock::now();
+    //    if (on_log_message_ != nullptr) {
+    //        on_log_message_("info", "首次上行音频已发送", "语音协议", "设备首次向服务端发送音频数据");
+    //    }
+    //    first_outgoing_audio_logged_ = true;
+    //}
+    //return ok;
 }
 
 bool TwilioProtocol::SendTwilioStop()
@@ -332,6 +383,15 @@ void TwilioProtocol::ParseTwilioMedia(const cJSON* root)
     {
         if (on_incoming_audio_ != nullptr)
         {
+            if (!first_incoming_audio_logged_) {
+                if (on_log_message_ != nullptr) {
+                    auto now = std::chrono::steady_clock::now();
+                    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - first_outgoing_audio_time_).count();
+                    on_log_message_("info", "首次下行音频已接收", "语音协议",
+                        "上行到下行耗时: " + std::to_string(ms) + "ms");
+                }
+                first_incoming_audio_logged_ = true;
+            }
             //ESP_LOGI(TAG, "🔊 received %d bytes audio, payload size: %d, encoded: %s", encoded.size(), pcm.size(), encoded.c_str());
             on_incoming_audio_(std::make_unique<AudioStreamPacket>(AudioStreamPacket{
                 .sample_rate = 16000,

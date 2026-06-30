@@ -62,7 +62,10 @@ public:
     void OnNetworkError(std::function<void(const std::string& message)> callback);
     void OnConnected(std::function<void()> callback);
     void OnDisconnected(std::function<void()> callback);
+    void OnLogMessage(std::function<void(const std::string& level, const std::string& message,
+                                         const std::string& event, const std::string& desc)> callback);
 
+    virtual void SetNetWorkUrl(const std::string& config_url) = 0;
     virtual bool Start() = 0;
     virtual bool OpenAudioChannel() = 0;
     virtual void CloseAudioChannel() = 0;
@@ -87,6 +90,8 @@ protected:
     std::function<void(const std::string& message)> on_network_error_;
     std::function<void()> on_connected_;
     std::function<void()> on_disconnected_;
+    std::function<void(const std::string& level, const std::string& message,
+                       const std::string& event, const std::string& desc)> on_log_message_;
 
     int server_sample_rate_ = 24000;
     int server_frame_duration_ = 60;

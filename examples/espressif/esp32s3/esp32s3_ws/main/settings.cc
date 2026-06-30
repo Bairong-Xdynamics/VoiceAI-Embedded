@@ -67,6 +67,27 @@ void Settings::SetInt(const std::string& key, int32_t value) {
     }
 }
 
+int64_t Settings::GetInt64(const std::string& key, int64_t default_value) {
+    if (nvs_handle_ == 0) {
+        return default_value;
+    }
+
+    int64_t value;
+    if (nvs_get_i64(nvs_handle_, key.c_str(), &value) != ESP_OK) {
+        return default_value;
+    }
+    return value;
+}
+
+void Settings::SetInt64(const std::string& key, int64_t value) {
+    if (read_write_) {
+        ESP_ERROR_CHECK(nvs_set_i64(nvs_handle_, key.c_str(), value));
+        dirty_ = true;
+    } else {
+        ESP_LOGW(TAG, "Namespace %s is not open for writing", ns_.c_str());
+    }
+}
+
 bool Settings::GetBool(const std::string& key, bool default_value) {
     if (nvs_handle_ == 0) {
         return default_value;

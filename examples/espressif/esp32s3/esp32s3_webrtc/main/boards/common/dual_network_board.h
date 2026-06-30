@@ -49,6 +49,8 @@ public:
     // 重写Board接口
     virtual std::string GetBoardType() override;
     virtual void StartNetwork() override;
+    virtual bool StartNetwork(const std::string& ssid, const std::string& password) override;
+    virtual void ResetWifiConfiguration() override;
     virtual NetworkInterface* GetNetwork() override;
     virtual const char* GetNetworkStateIcon() override;
     virtual void SetPowerSaveMode(bool enabled) override;

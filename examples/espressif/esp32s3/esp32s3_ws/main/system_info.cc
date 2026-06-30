@@ -39,7 +39,7 @@ std::string SystemInfo::GetMacAddress() {
     esp_read_mac(mac, ESP_MAC_WIFI_STA);
 #endif
     char mac_str[18];
-    snprintf(mac_str, sizeof(mac_str), "%02x:%02x:%02x:%02x:%02x:%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    snprintf(mac_str, sizeof(mac_str), "%02x%02x%02x%02x%02x%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     return std::string(mac_str);
 }
 
@@ -47,9 +47,17 @@ std::string SystemInfo::GetChipModelName() {
     return std::string(CONFIG_IDF_TARGET);
 }
 
+std::string SystemInfo::GetVersion() {
+    auto app_desc = esp_app_get_description();
+    if (app_desc == nullptr || app_desc->version[0] == '\0') {
+        return "1.0.0";
+    }
+    return std::string(app_desc->version);
+}
+
 std::string SystemInfo::GetUserAgent() {
     auto app_desc = esp_app_get_description();
-    auto user_agent = std::string(BOARD_NAME "/") + app_desc->version;
+    auto user_agent = std::string(app_desc->project_name) + "/" + app_desc->version;
     return user_agent;
 }
 

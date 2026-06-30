@@ -16,6 +16,7 @@
 #include <wifi_configuration_ap.h>
 #include <ssid_manager.h>
 #include "afsk_demod.h"
+#include "blufi.h"
 
 static const char *TAG = "WifiBoard";
 
@@ -36,6 +37,12 @@ void WifiBoard::EnterWifiConfigMode() {
     auto& application = Application::GetInstance();
     application.SetDeviceState(kDeviceStateWifiConfiguring);
 
+    esp_err_t ret = Blufi::GetInstance().Init();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "BLUFI init failed: %s", esp_err_to_name(ret));
+        return;
+    }
+
     auto& wifi_ap = WifiConfigurationAp::GetInstance();
     wifi_ap.SetLanguage(Lang::CODE);
     wifi_ap.SetSsidPrefix("Xiaozhi");
@@ -51,7 +58,7 @@ void WifiBoard::EnterWifiConfigMode() {
     hint += wifi_ap.GetWebServerUrl();
     
     // Announce WiFi configuration prompt
-    application.Alert(Lang::Strings::WIFI_CONFIG_MODE, hint.c_str(), "gear", Lang::Sounds::OGG_WIFICONFIG);
+    application.Alert(Lang::Strings::WIFI_CONFIG_MODE, /*hint.c_str()*/"配置WIFI中...", "gear", Lang::Sounds::OGG_WIFICONFIG);
 
     #if CONFIG_USE_ACOUSTIC_WIFI_PROVISIONING
     auto display = Board::GetInstance().GetDisplay();
@@ -68,6 +75,24 @@ void WifiBoard::EnterWifiConfigMode() {
     while (true) {
         vTaskDelay(pdMS_TO_TICKS(10000));
     }
+}
+
+bool WifiBoard::StartNetwork(const std::string& ssid, const std::string& password)
+{
+    auto& wifi_ap = WifiConfigurationAp::GetInstance();
+    if (!wifi_ap.ConnectToWifi(ssid, password)) {
+        return false;
+    }
+    //SsidManager::GetInstance().Clear();
+    //ESP_LOGI(TAG, "Cleared saved WiFi SSID/password from NVS");
+    
+    wifi_ap.Save(ssid, password);
+    xTaskCreate([](void *ctx){
+        ESP_LOGI(TAG, "Restarting in 3 second");
+        vTaskDelay(pdMS_TO_TICKS(3000));
+        esp_restart();
+    }, "restart_task", 4096, NULL, 5, NULL);
+    return true;
 }
 
 void WifiBoard::StartNetwork() {

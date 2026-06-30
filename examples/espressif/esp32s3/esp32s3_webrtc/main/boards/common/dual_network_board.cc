@@ -61,6 +61,11 @@ std::string DualNetworkBoard::GetBoardType() {
     return current_board_->GetBoardType();
 }
 
+bool DualNetworkBoard::StartNetwork(const std::string& ssid, const std::string& password) {
+    StartNetwork();
+    return true;
+}
+
 void DualNetworkBoard::StartNetwork() {
     auto display = Board::GetInstance().GetDisplay();
     
@@ -70,6 +75,10 @@ void DualNetworkBoard::StartNetwork() {
         display->SetStatus(Lang::Strings::DETECTING_MODULE);
     }
     current_board_->StartNetwork();
+}
+
+void DualNetworkBoard::ResetWifiConfiguration() {
+    current_board_->ResetWifiConfiguration();
 }
 
 NetworkInterface* DualNetworkBoard::GetNetwork() {

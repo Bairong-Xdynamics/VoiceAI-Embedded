@@ -6,6 +6,7 @@
 #include <freertos/task.h>
 #include <esp_timer.h>
 
+#include <cstdint>
 #include <string>
 #include <mutex>
 #include <deque>
@@ -14,6 +15,8 @@
 #include "protocol.h"
 #include "ota.h"
 #include "audio_service.h"
+#include "app_mqtt_client.h"
+#include "activate_api.h"
 #include "device_state_event.h"
 
 
@@ -24,12 +27,21 @@
 #define MAIN_EVENT_ERROR (1 << 4)
 #define MAIN_EVENT_CHECK_NEW_VERSION_DONE (1 << 5)
 #define MAIN_EVENT_CLOCK_TICK (1 << 6)
+#define MAIN_EVENT_ENCODE_QUEUE_OVERFLOW (1 << 7)
 
 
 enum AecMode {
     kAecOff,
     kAecOnDeviceSide,
     kAecOnServerSide,
+};
+
+struct AppNvsConfig {
+    std::string user_id;
+    std::string token;
+    std::string user_token;
+    int64_t timestamp = 0;
+    bool activate_state = false;
 };
 
 class Application {
@@ -56,13 +68,15 @@ public:
     void StopListening();
     void Reboot();
     void WakeWordInvoke(const std::string& wake_word);
-    bool UpgradeFirmware(Ota& ota, const std::string& url = "");
+    bool UpgradeFirmware(Ota& ota, const std::string& url = "", const std::string& firmware_md5 = "");
     bool CanEnterSleepMode();
     void SendMcpMessage(const std::string& payload);
     void SetAecMode(AecMode mode);
     AecMode GetAecMode() const { return aec_mode_; }
     void PlaySound(const std::string_view& sound);
     AudioService& GetAudioService() { return audio_service_; }
+    bool StartNetwork(const std::string& ssid, const std::string& password);
+    void ActivateParameter(const std::string& param);
 
 private:
     Application();
@@ -78,10 +92,14 @@ private:
     AecMode aec_mode_ = kAecOff;
     std::string last_error_message_;
     AudioService audio_service_;
+    MqttClient mqtt_client_;
+    Ota ota_;
+    activate_api::DeviceConfigPayload server_device_config_;
 
     bool has_server_time_ = false;
     bool aborted_ = false;
     int clock_ticks_ = 0;
+    int vad_silence_seconds_ = 0;
     TaskHandle_t check_new_version_task_handle_ = nullptr;
     TaskHandle_t main_event_loop_task_handle_ = nullptr;
 
@@ -90,6 +108,19 @@ private:
     void CheckAssetsVersion();
     void ShowActivationCode(const std::string& code, const std::string& message);
     void SetListeningMode(ListeningMode mode);
+    bool ActivateMain(AppNvsConfig& cfg);
+    bool SetActivate(Http* http, const std::string& endpoint_url, const std::string& app_version,
+        const std::string& device_id, AppNvsConfig& cfg);
+    bool GetActivate(Http* http, const std::string& endpoint_url, const std::string& app_version,
+            const std::string& device_id, AppNvsConfig& cfg);
+    bool ServerTime(Http* http, const std::string& endpoint_url, const std::string& app_version,
+        const std::string& device_id, AppNvsConfig& cfg);
+    bool GetToken(Http* http, const std::string& endpoint_url, const std::string& app_version,
+        const std::string& device_id, AppNvsConfig& cfg);
+    bool GetLinkConfig(Http* http, const std::string& endpoint_url, const std::string& app_version,
+        const std::string& device_id, AppNvsConfig& cfg);
+    void SendLogMessage(const std::string& level, const std::string& message,
+                        const std::string& event, const std::string& desc);
 };
 
 

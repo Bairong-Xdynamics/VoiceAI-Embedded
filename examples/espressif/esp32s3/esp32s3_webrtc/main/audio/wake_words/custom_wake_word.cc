@@ -65,19 +65,24 @@ void CustomWakeWord::ParseWakenetModelConfig() {
         if (cJSON_IsNumber(threshold)) {
             threshold_ = threshold->valuedouble;
         }
-        if (cJSON_IsArray(commands)) {
-            for (int i = 0; i < cJSON_GetArraySize(commands); i++) {
-                cJSON* command = cJSON_GetArrayItem(commands, i);
-                if (cJSON_IsObject(command)) {
-                    cJSON* command_name = cJSON_GetObjectItem(command, "command");
-                    cJSON* text = cJSON_GetObjectItem(command, "text");
-                    cJSON* action = cJSON_GetObjectItem(command, "action");
-                    if (cJSON_IsString(command_name) && cJSON_IsString(text) && cJSON_IsString(action)) {
-                        commands_.push_back({command_name->valuestring, text->valuestring, action->valuestring});
-                        ESP_LOGI(TAG, "Command: %s, Text: %s, Action: %s", command_name->valuestring, text->valuestring, action->valuestring);
+        if (wake_word_.empty() || wake_name_.empty()) {
+            if (cJSON_IsArray(commands)) {
+                for (int i = 0; i < cJSON_GetArraySize(commands); i++) {
+                    cJSON* command = cJSON_GetArrayItem(commands, i);
+                    if (cJSON_IsObject(command)) {
+                        cJSON* command_name = cJSON_GetObjectItem(command, "command");
+                        cJSON* text = cJSON_GetObjectItem(command, "text");
+                        cJSON* action = cJSON_GetObjectItem(command, "action");
+                        if (cJSON_IsString(command_name) && cJSON_IsString(text) && cJSON_IsString(action)) {
+                            commands_.push_back({command_name->valuestring, text->valuestring, action->valuestring});
+                            ESP_LOGI(TAG, "Command: %s, Text: %s, Action: %s", command_name->valuestring, text->valuestring, action->valuestring);
+                        }
                     }
                 }
             }
+        } else {
+            commands_.push_back({wake_word_, wake_name_, "wake"});
+            ESP_LOGI(TAG, "Command: %s, Text: %s, Action: %s", wake_word_.c_str(), wake_name_.c_str(), "wake");
         }
     }
     cJSON_Delete(root);
@@ -127,6 +132,7 @@ bool CustomWakeWord::Initialize(AudioCodec* codec, srmodel_list_t* models_list) 
     esp_mn_commands_update();
     
     multinet_->print_active_speech_commands(multinet_model_data_);
+    pending_commands_update_ = false;
     return true;
 }
 
@@ -142,9 +148,40 @@ void CustomWakeWord::Stop() {
     running_ = false;
 }
 
+void CustomWakeWord::ApplyPendingCommands() {
+    if (multinet_ == nullptr || multinet_model_data_ == nullptr) {
+        return;
+    }
+
+    commands_.clear();
+    if (!wake_word_.empty() && !wake_name_.empty()) {
+        commands_.push_back({wake_word_, wake_name_, "wake"});
+        ESP_LOGI(TAG, "Apply runtime wake word: command=%s text=%s", wake_word_.c_str(), wake_name_.c_str());
+    } else {
+        // 没有设置自定义唤醒词，回退到 index.json 的默认命令
+        ParseWakenetModelConfig();
+        ESP_LOGI(TAG, "Apply default wake words from index.json, count=%d", (int)commands_.size());
+    }
+
+    esp_mn_commands_clear();
+    for (int i = 0; i < commands_.size(); i++) {
+        esp_mn_commands_add(i + 1, commands_[i].command.c_str());
+    }
+    esp_mn_commands_update();
+
+    // 清理 multinet 当前检测状态，避免残留导致误识别
+    multinet_->clean(multinet_model_data_);
+    multinet_->print_active_speech_commands(multinet_model_data_);
+}
+
 void CustomWakeWord::Feed(const std::vector<int16_t>& data) {
     if (multinet_model_data_ == nullptr || !running_) {
         return;
+    }
+
+    // 在 Feed 线程内热更新命令词，避免与 detect 并发操作 multinet
+    if (pending_commands_update_.exchange(false)) {
+        ApplyPendingCommands();
     }
 
     esp_mn_state_t mn_state;
@@ -223,16 +260,16 @@ void CustomWakeWord::EncodeWakeWordData() {
 
             int packets = 0;
             for (auto& pcm: this_->wake_word_pcm_) {
-                //std::lock_guard<std::mutex> lock(this_->wake_word_mutex_);
-                //std::vector<uint8_t> bytes(pcm.size() * 2);
-                //memcpy(bytes.data(), pcm.data(), pcm.size() * sizeof(int16_t));
-                //this_->wake_word_opus_.emplace_back(std::move(bytes));
-                //this_->wake_word_cv_.notify_all();
-                encoder->Encode(std::move(pcm), [this_](std::vector<uint8_t>&& opus) {
                     std::lock_guard<std::mutex> lock(this_->wake_word_mutex_);
-                    this_->wake_word_opus_.emplace_back(std::move(opus));
+                std::vector<uint8_t> bytes(pcm.size() * 2);
+                memcpy(bytes.data(), pcm.data(), pcm.size() * sizeof(int16_t));
+                this_->wake_word_opus_.emplace_back(std::move(bytes));
                     this_->wake_word_cv_.notify_all();
-                });
+                //encoder->Encode(std::move(pcm), [this_](std::vector<uint8_t>&& opus) {
+                //    std::lock_guard<std::mutex> lock(this_->wake_word_mutex_);
+                //    this_->wake_word_opus_.emplace_back(std::move(opus));
+                //    this_->wake_word_cv_.notify_all();
+                //});
                 packets++;
             }
             this_->wake_word_pcm_.clear();
@@ -256,4 +293,22 @@ bool CustomWakeWord::GetWakeWordOpus(std::vector<uint8_t>& opus) {
     opus.swap(wake_word_opus_.front());
     wake_word_opus_.pop_front();
     return !opus.empty();
+}
+
+bool CustomWakeWord::SetWakeWord(const std::string& wake_word, const std::string& wake_name) {
+    ESP_LOGI(TAG, "Set wake word: %s, %s", wake_word.c_str(), wake_name.c_str());
+    if (wake_word_ == wake_word && wake_name_ == wake_name) {
+        ESP_LOGI(TAG, "Wake word unchanged, skip update");
+        return true;
+    }
+
+    wake_word_ = wake_word;
+    wake_name_ = wake_name;
+
+    if (multinet_ != nullptr && multinet_model_data_ != nullptr) {
+        // multinet 已初始化，通知 Feed 线程在下一次回调时热更新命令词
+        pending_commands_update_ = true;
+        ESP_LOGI(TAG, "Wake word update scheduled, will take effect on next audio frame");
+    }
+    return true;
 }

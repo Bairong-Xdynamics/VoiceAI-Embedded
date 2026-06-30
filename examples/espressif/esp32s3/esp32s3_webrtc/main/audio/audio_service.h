@@ -19,6 +19,7 @@
 
 #include "audio_codec.h"
 #include "audio_processor.h"
+#include "pcm_voice_detector.h"
 #include "processors/audio_debugger.h"
 #include "wake_word.h"
 #include "protocol.h"
@@ -57,6 +58,7 @@ struct AudioServiceCallbacks {
     std::function<void(const std::string&)> on_wake_word_detected;
     std::function<void(bool)> on_vad_change;
     std::function<void(void)> on_audio_testing_queue_full;
+    std::function<void(void)> on_encode_queue_overflow;
 };
 
 
@@ -109,6 +111,7 @@ public:
     bool ReadAudioData(std::vector<int16_t>& data, int sample_rate, int samples);
     void ResetDecoder();
     void SetModelsList(srmodel_list_t* models_list);
+    bool ConfigureCustomWakeWord(const std::string& wake_word, const std::string& wake_name);
     bool PushPacketToPcmQueue(std::unique_ptr<AudioStreamPacket> packet, bool wait = false);
 
 private:
@@ -137,6 +140,11 @@ private:
     TaskHandle_t audio_input_task_handle_ = nullptr;
     TaskHandle_t audio_output_task_handle_ = nullptr;
     TaskHandle_t opus_codec_task_handle_ = nullptr;
+#if CONFIG_SPIRAM
+    StackType_t* opus_codec_task_stack_ = nullptr;
+    StaticTask_t* opus_codec_task_tcb_ = nullptr;
+    static constexpr size_t kOpusCodecTaskStackSize = 2048 * 13;
+#endif
     std::mutex audio_queue_mutex_;
     std::condition_variable audio_queue_cv_; 
     std::deque<std::unique_ptr<AudioStreamPacket>> audio_pcm_queue_;
@@ -151,6 +159,7 @@ private:
     bool wake_word_initialized_ = false;
     bool audio_processor_initialized_ = false;
     bool voice_detected_ = false;
+    PcmVoiceDetector pcm_voice_detector_;
     bool service_stopped_ = true;
     bool audio_input_need_warmup_ = false;
 
@@ -170,6 +179,7 @@ private:
 #endif
     void PcmTask();
     void PushTaskToPcmQueue(AudioTaskType type, std::vector<int16_t>&& pcm);
+    void UpdatePcmVoiceFromCapturedInput(const std::vector<int16_t>& data, size_t samples, bool mic_is_mono);
 };
 
 #endif

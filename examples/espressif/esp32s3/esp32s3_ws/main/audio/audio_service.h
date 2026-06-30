@@ -19,6 +19,7 @@
 
 #include "audio_codec.h"
 #include "audio_processor.h"
+#include "pcm_voice_detector.h"
 #include "processors/audio_debugger.h"
 #include "wake_word.h"
 #include "protocol.h"
@@ -109,6 +110,7 @@ public:
     bool ReadAudioData(std::vector<int16_t>& data, int sample_rate, int samples);
     void ResetDecoder();
     void SetModelsList(srmodel_list_t* models_list);
+    bool ConfigureCustomWakeWord(const std::string& wake_word, const std::string& wake_name);
     bool PushPacketToPcmQueue(std::unique_ptr<AudioStreamPacket> packet, bool wait = false);
 
 private:
@@ -151,6 +153,7 @@ private:
     bool wake_word_initialized_ = false;
     bool audio_processor_initialized_ = false;
     bool voice_detected_ = false;
+    PcmVoiceDetector pcm_voice_detector_;
     bool service_stopped_ = true;
     bool audio_input_need_warmup_ = false;
 
@@ -170,7 +173,7 @@ private:
 #endif
     void PcmTask();
     void PushTaskToPcmQueue(AudioTaskType type, std::vector<int16_t>&& pcm);
-
+    void UpdatePcmVoiceFromCapturedInput(const std::vector<int16_t>& data, size_t samples, bool mic_is_mono);
 };
 
 #endif

@@ -18,6 +18,11 @@ std::string Ml307Board::GetBoardType() {
     return "ml307";
 }
 
+bool Ml307Board::StartNetwork(const std::string& ssid, const std::string& password) {
+    StartNetwork();
+    return true;
+}
+
 void Ml307Board::StartNetwork() {
     auto& application = Application::GetInstance();
     auto display = Board::GetInstance().GetDisplay();
@@ -70,6 +75,10 @@ void Ml307Board::StartNetwork() {
 
 NetworkInterface* Ml307Board::GetNetwork() {
     return modem_.get();
+}
+
+void Ml307Board::ResetWifiConfiguration() {
+    // TODO: Implement reset wifi configuration for ML307
 }
 
 const char* Ml307Board::GetNetworkStateIcon() {

@@ -32,6 +32,11 @@ void Protocol::OnDisconnected(std::function<void()> callback) {
     on_disconnected_ = callback;
 }
 
+void Protocol::OnLogMessage(std::function<void(const std::string& level, const std::string& message,
+                                                const std::string& event, const std::string& desc)> callback) {
+    on_log_message_ = callback;
+}
+
 void Protocol::SetError(const std::string& message) {
     error_occurred_ = true;
     if (on_network_error_ != nullptr) {
@@ -79,7 +84,7 @@ void Protocol::SendMcpMessage(const std::string& payload) {
 }
 
 bool Protocol::IsTimeout() const {
-    const int kTimeoutSeconds = 60;//120;
+    const int kTimeoutSeconds = 120;
     auto now = std::chrono::steady_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - last_incoming_time_);
     bool timeout = duration.count() > kTimeoutSeconds;

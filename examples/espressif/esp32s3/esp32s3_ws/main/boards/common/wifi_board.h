@@ -13,10 +13,11 @@ public:
     WifiBoard();
     virtual std::string GetBoardType() override;
     virtual void StartNetwork() override;
+    virtual bool StartNetwork(const std::string& ssid, const std::string& password) override;
     virtual NetworkInterface* GetNetwork() override;
     virtual const char* GetNetworkStateIcon() override;
     virtual void SetPowerSaveMode(bool enabled) override;
-    virtual void ResetWifiConfiguration();
+    virtual void ResetWifiConfiguration() override;
     virtual AudioCodec* GetAudioCodec() override { return nullptr; }
     virtual std::string GetDeviceStatusJson() override;
 };

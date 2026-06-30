@@ -31,6 +31,7 @@ public:
     void EncodeWakeWordData();
     bool GetWakeWordOpus(std::vector<uint8_t>& opus);
     const std::string& GetLastDetectedWakeWord() const { return last_detected_wake_word_; }
+    bool SetWakeWord(const std::string& wake_word, const std::string& wake_name);
 
 private:
     struct Command {
@@ -48,11 +49,14 @@ private:
     int duration_ = 3000;
     float threshold_ = 0.2;
     std::deque<Command> commands_;
+    std::string wake_word_;
+    std::string wake_name_;
  
     std::function<void(const std::string& wake_word)> wake_word_detected_callback_;
     AudioCodec* codec_ = nullptr;
     std::string last_detected_wake_word_;
     std::atomic<bool> running_ = false;
+    std::atomic<bool> pending_commands_update_ = false;
 
     TaskHandle_t wake_word_encode_task_ = nullptr;
     StaticTask_t* wake_word_encode_task_buffer_ = nullptr;
@@ -64,6 +68,7 @@ private:
 
     void StoreWakeWordData(const std::vector<int16_t>& data);
     void ParseWakenetModelConfig();
+    void ApplyPendingCommands();
 };
 
 #endif

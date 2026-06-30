@@ -1,6 +1,7 @@
 # Define source files
 set(SOURCES "audio/audio_codec.cc"
             "audio/audio_service.cc"
+            "audio/pcm_voice_detector.cc"
             "audio/codecs/no_audio_codec.cc"
             "audio/codecs/box_audio_codec.cc"
             "audio/codecs/es8311_audio_codec.cc"
@@ -26,18 +27,25 @@ set(SOURCES "audio/audio_codec.cc"
             "display/lvgl_display/jpg/image_to_jpeg.cpp"
             "display/lvgl_display/jpg/jpeg_to_image.c"
             "debug/ws_log_pcm_sink.cc"
+            "blufi/blufi_init.c"
+            "blufi/blufi_security.c"
+            "blufi/blufi.cc"
             "mcp_server.cc"
             "system_info.cc"
             "application.cc"
+            "tls13_test.cc"
             "ota.cc"
             "settings.cc"
+            "app_mqtt_client.cc"
+            "esp_mqtt_lwt.cc"
+            "activate_api.cc"
             "device_state_event.cc"
             "assets.cc"
             "main.cc"
             "iot_freertos_compat.c"  
             )
 
-set(INCLUDE_DIRS "." "display" "display/lvgl_display" "display/lvgl_display/jpg" "audio")
+set(INCLUDE_DIRS "." "display" "display/lvgl_display" "display/lvgl_display/jpg" "audio" "blufi")
 
 # Add board common files
 file(GLOB BOARD_COMMON_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/boards/common/*.cc)
@@ -692,11 +700,26 @@ if(CONFIG_IDF_TARGET_ESP32)
                              )
 endif()
 
+if(CONFIG_BT_ENABLED)
 idf_component_register(SRCS ${SOURCES}
                     EMBED_FILES ${LANG_SOUNDS} ${COMMON_SOUNDS}
                     INCLUDE_DIRS ${INCLUDE_DIRS}
+                        PRIV_REQUIRES bt mbedtls
                     WHOLE_ARCHIVE
                     )
+else()
+    idf_component_register(SRCS ${SOURCES}
+                        EMBED_FILES ${LANG_SOUNDS} ${COMMON_SOUNDS}
+                        INCLUDE_DIRS ${INCLUDE_DIRS}
+                        WHOLE_ARCHIVE
+                        )
+endif()
+
+# Link esp_http_client for tls13_test without overriding idf_component.yml deps
+target_link_libraries(${COMPONENT_LIB} PRIVATE idf::esp_http_client)
+
+# Link mqtt for esp_mqtt_lwt without overriding idf_component.yml deps
+target_link_libraries(${COMPONENT_LIB} PRIVATE idf::mqtt)
 
 # Use target_compile_definitions to define BOARD_TYPE, BOARD_NAME
 # If BOARD_NAME is empty, use BOARD_TYPE

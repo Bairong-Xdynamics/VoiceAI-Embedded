@@ -681,6 +681,12 @@ config AUDIO_DEBUG_UDP_SERVER
     help
         UDP server address, format: IP:PORT, used to receive audio debugging data
 
+config RUN_TLS13_TEST_AT_BOOT
+    bool "Run TLS 1.3 HTTPS self-test after network is up"
+    default n
+    help
+        联网后访问 https://www.howsmyssl.com/a/check ，强制使用 TLS 1.3 并校验响应中的协议版本。
+        
 config USE_WS_DEBUG_SINK
     bool "Enable WebSocket debug sink (log + PCM)"
     default n

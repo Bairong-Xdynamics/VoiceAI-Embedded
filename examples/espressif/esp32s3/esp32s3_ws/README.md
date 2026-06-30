@@ -42,39 +42,20 @@ See the [ESP-IDF getting started guide](https://docs.espressif.com/projects/esp-
    cd VoiceAI-Embedded/examples/espressif/esp32s3/esp32s3_ws
    ```
 
-2. Set product token, product key, and related options.
-
-   ```bash
-   idf.py menuconfig
-   ```
-
-   Open the **Xiaozhi Assistant** menu. Set **Key** to your product `robot_key`, and **Token** (the menu may label this as **Tokey**) to your product `robot_tokey`, then save.
-
-3. Build.
+2. Build.
 
    ```bash
    idf.py build
    ```
 
-### Flash and run the demo
-
-1. Power on the Espressif development board.
-2. Flash the firmware.
+3. Flash the firmware.
 
    ```bash
    idf.py flash
    ```
 
-3. Run the monitor to view serial logs.
+4. Run the monitor to view serial logs.
 
    ```bash
    idf.py monitor
    ```
-
-4. Wi-Fi provisioning.
-
-   1. On your phone, connect to a hotspot named like `Xiaozhi-XXXXXX`.
-   2. Open a browser and go to `http://192.168.4.1` to open the Wi-Fi setup page.
-   3. Enter the Wi-Fi SSID and password, then submit.
-
-   > **Note:** To switch to another Wi-Fi network, reboot the device. If after reboot it cannot reach the previously saved network (out of range or network gone), wait about 30 seconds for provisioning mode, then repeat the three Wi-Fi steps above.
