@@ -28,7 +28,7 @@
 #define MAIN_EVENT_CHECK_NEW_VERSION_DONE (1 << 5)
 #define MAIN_EVENT_CLOCK_TICK (1 << 6)
 #define MAIN_EVENT_ENCODE_QUEUE_OVERFLOW (1 << 7)
-
+#define MAIN_EVENT_CONFIG_WAKE_WORD_DETECTED (1 << 8)
 
 enum AecMode {
     kAecOff,
@@ -104,6 +104,7 @@ private:
     TaskHandle_t main_event_loop_task_handle_ = nullptr;
 
     void OnWakeWordDetected();
+    void OnConfigWakeWordDetected();
     void CheckNewVersion(Ota& ota);
     void CheckAssetsVersion();
     void ShowActivationCode(const std::string& code, const std::string& message);

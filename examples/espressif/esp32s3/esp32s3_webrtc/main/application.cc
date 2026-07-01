@@ -88,7 +88,7 @@ Application::Application() {
 #else
     aec_mode_ = kAecOff;
 #endif
-
+    protocol_ = nullptr;
     esp_timer_create_args_t clock_timer_args = {
         .callback = [](void* arg) {
             Application* app = (Application*)arg;
@@ -482,6 +482,8 @@ void Application::Start() {
     // Setup the audio service 
     auto codec = board.GetAudioCodec();
     audio_service_.Initialize(codec);
+    codec->SetOutputVolume(100);
+    codec->EnableOutput(true);;
     audio_service_.Start();
 
     AudioServiceCallbacks callbacks;
@@ -680,11 +682,18 @@ void Application::Start() {
         // Set the output volume
         codec->SetOutputVolume(config.volume);
 
+        const std::string& rtc_voice_url = server_device_config_.ok ? server_device_config_.rtc_voice_url : kRtcVoiceUrl;
+        // wake word open
+        if(protocol_) {
+            protocol_->UpdateConfig(config.robot_key, config.robot_token, config.model_config);
+            protocol_->SetNetWorkUrl(rtc_voice_url);
+            xEventGroupSetBits(event_group_, MAIN_EVENT_CONFIG_WAKE_WORD_DETECTED);
+            return;
+        }
+
         //std::string model_config = "{\"tts\":{\"voice\":\"zh-CN-XiaoxiaoNeural\"}}";
         //protocol_ = std::make_unique<RtcProtocol>("dZSJQ08Y7AYrL7lfPe2%2BBxelWH8%3D", "MTc3NjI0MTczNjc5OApKeHJ1cHFpTC9kWlR3aHF2WE9uOXRIUnEzdGM9", config.model_config);
         protocol_ = std::make_unique<RtcProtocol>(config.robot_key, config.robot_token, config.model_config);
-        const std::string& rtc_voice_url = server_device_config_.ok ? server_device_config_.rtc_voice_url
-                                                             : kRtcVoiceUrl;
         protocol_->SetNetWorkUrl(rtc_voice_url);
         protocol_->OnConnected([this]() {
             DismissAlert();
@@ -775,6 +784,7 @@ void Application::MainEventLoop() {
         auto bits = xEventGroupWaitBits(event_group_, MAIN_EVENT_SCHEDULE |
             MAIN_EVENT_SEND_AUDIO |
             MAIN_EVENT_WAKE_WORD_DETECTED |
+            MAIN_EVENT_CONFIG_WAKE_WORD_DETECTED |
             MAIN_EVENT_VAD_CHANGE |
             MAIN_EVENT_CLOCK_TICK |
             MAIN_EVENT_ENCODE_QUEUE_OVERFLOW |
@@ -802,6 +812,10 @@ void Application::MainEventLoop() {
 
         if (bits & MAIN_EVENT_WAKE_WORD_DETECTED) {
             OnWakeWordDetected();
+        }
+
+        if (bits & MAIN_EVENT_CONFIG_WAKE_WORD_DETECTED) {
+            OnConfigWakeWordDetected();
         }
 
         if (bits & MAIN_EVENT_VAD_CHANGE) {
@@ -897,6 +911,12 @@ void Application::MainEventLoop() {
 }
 
 void Application::OnWakeWordDetected() {
+    if (mqtt_client_.IsConnected()) {
+        mqtt_client_.SendGetConfig();
+    }
+}
+
+void Application::OnConfigWakeWordDetected() {
     if (!protocol_) {
         return;
     }
@@ -911,7 +931,7 @@ void Application::OnWakeWordDetected() {
                 return;
             }
         }
-
+        
         auto wake_word = audio_service_.GetLastWakeWord();
         ESP_LOGI(TAG, "Wake word detected: %s", wake_word.c_str());
 #if CONFIG_SEND_WAKE_WORD_DATA

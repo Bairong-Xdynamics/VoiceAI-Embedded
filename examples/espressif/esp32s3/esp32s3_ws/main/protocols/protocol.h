@@ -65,6 +65,7 @@ public:
     void OnLogMessage(std::function<void(const std::string& level, const std::string& message,
                                          const std::string& event, const std::string& desc)> callback);
 
+    virtual void UpdateConfig(const std::string& robot_key, const std::string& robot_token, const std::string& model_config) = 0;
     virtual void SetNetWorkUrl(const std::string& config_url) = 0;
     virtual bool Start() = 0;
     virtual bool OpenAudioChannel() = 0;

@@ -23,6 +23,7 @@ public:
     TwilioProtocol(const std::string& robot_key, const std::string& robot_tokens, const std::string& model_config);
     ~TwilioProtocol();
 
+    void UpdateConfig(const std::string& robot_key, const std::string& robot_token, const std::string& model_config) override;
     void SetNetWorkUrl(const std::string& config_url) override;
     bool Start() override;
     bool SendAudio(std::unique_ptr<AudioStreamPacket> packet) override;

@@ -92,6 +92,12 @@ TwilioProtocol::~TwilioProtocol() {
     vEventGroupDelete(event_group_handle_);
 }
 
+void TwilioProtocol::UpdateConfig(const std::string& robot_key, const std::string& robot_token, const std::string& model_config) {
+    robot_key_ = robot_key;
+    robot_token_ = robot_token;
+    model_config_ = model_config;
+}
+   
 void TwilioProtocol::SetNetWorkUrl(const std::string& config_url) {
     network_url_ = config_url;
 }
