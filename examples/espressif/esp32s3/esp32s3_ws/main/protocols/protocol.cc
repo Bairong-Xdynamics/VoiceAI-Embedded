@@ -4,6 +4,10 @@
 
 #define TAG "Protocol"
 
+std::string Protocol::GetVersion() const {
+    return "1.0.0";
+}
+
 void Protocol::OnIncomingJson(std::function<void(const cJSON* root)> callback) {
     on_incoming_json_ = callback;
 }

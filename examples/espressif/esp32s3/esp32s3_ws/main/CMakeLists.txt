@@ -44,7 +44,6 @@ set(SOURCES "audio/audio_codec.cc"
             "device_state_event.cc"
             "assets.cc"
             "main.cc"
-            "agora_freertos_compat.c"  # 为 Agora libahpl.a 提供 xTaskCreateRestrictedPinnedToCore
             )
 
 set(INCLUDE_DIRS "." "display" "display/lvgl_display" "display/lvgl_display/jpg" "audio" "protocols" "blufi")

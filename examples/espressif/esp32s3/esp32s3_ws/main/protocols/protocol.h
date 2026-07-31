@@ -65,6 +65,7 @@ public:
     void OnLogMessage(std::function<void(const std::string& level, const std::string& message,
                                          const std::string& event, const std::string& desc)> callback);
 
+    std::string GetVersion() const;
     virtual void UpdateConfig(const std::string& robot_key, const std::string& robot_token, const std::string& model_config) = 0;
     virtual void SetNetWorkUrl(const std::string& config_url) = 0;
     virtual bool Start() = 0;

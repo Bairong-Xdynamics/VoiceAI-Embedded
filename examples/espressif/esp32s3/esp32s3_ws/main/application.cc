@@ -702,6 +702,7 @@ void Application::Start() {
         //const std::string model_config = "{\"tts\":{\"voice\":\"zh-CN-XiaoxiaoNeural\"}}";
         //protocol_ = std::make_unique<TwilioProtocol>("dZSJQ08Y7AYrL7lfPe2%2BBxelWH8%3D", "MTc3NjI0MTczNjc5OApKeHJ1cHFpTC9kWlR3aHF2WE9uOXRIUnEzdGM9", config.model_config);
         protocol_ = std::make_unique<TwilioProtocol>(config.robot_key, config.robot_token, config.model_config);
+        ESP_LOGI(TAG, "protocol version: %s", protocol_->GetVersion().c_str());
         protocol_->SetNetWorkUrl(ws_voice_url);
         protocol_->OnConnected([this]() {
             DismissAlert();
@@ -740,6 +741,9 @@ void Application::Start() {
             });
         });
         protocol_->OnIncomingJson([this, display](const cJSON* root) {
+            //char* json_str = cJSON_PrintUnformatted(root);
+            //ESP_LOGI(TAG, "OnIncomingJson:%s", json_str);
+            //free(json_str);
         });
         protocol_->OnLogMessage([this](const std::string& level, const std::string& message,
                                        const std::string& event, const std::string& desc) {
@@ -750,6 +754,13 @@ void Application::Start() {
 
         SystemInfo::PrintHeapStats();
         SetDeviceState(kDeviceStateIdle);
+               
+        // wifi info report
+        Schedule([this]() {
+            if (mqtt_client_.IsConnected()) {
+                mqtt_client_.SendWifiInfo();
+            }
+        });
 
         if (protocol_started) {
             std::string message = std::string(Lang::Strings::VERSION) + SystemInfo::GetVersion();
@@ -872,7 +883,7 @@ void Application::MainEventLoop() {
             }
             if (clock_ticks_ % 30 == 0) {
                 if (mqtt_client_.IsConnected()) {
-                    mqtt_client_.SendHeartBeat();
+                    mqtt_client_.SendHeartBeat(100, false);
                 }
             }
             if (clock_ticks_ % (60 * 10) == 0) {

@@ -2,9 +2,11 @@
 #include "config.h"
 #include "esp_mqtt_lwt.h"
 #include "settings.h"
+#include "ssid_manager.h"
 #include "system_info.h"
 
 #include <cJSON.h>
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <esp_app_desc.h>
@@ -19,7 +21,7 @@ namespace {
 
 constexpr size_t kDedupCacheLimit = 256;
 constexpr int kDefaultBrokerPort = 8883;
-constexpr int64_t kReconnectIntervalUs = 5 * 1000000LL;
+constexpr int64_t kReconnectIntervalUs = MqttClient::kReconnectIntervalSec * 1000000LL;
 
 struct CJsonDelete {
     void operator()(cJSON* ptr) const {
@@ -202,7 +204,16 @@ void MqttClient::TryReconnect() {
     if (IsConnected() || connecting_) {
         return;
     }
-    ESP_LOGI(TAG, "MQTT reconnect timer fired");
+    if (reconnect_attempt_count_ >= kMaxReconnectAttempts) {
+        ESP_LOGE(TAG, "MQTT reconnect failed after %d attempts", reconnect_attempt_count_);
+        reconnect_failed_ = true;
+        if (user_on_reconnect_failed_) {
+            user_on_reconnect_failed_();
+        }
+        return;
+    }
+    reconnect_attempt_count_++;
+    ESP_LOGI(TAG, "MQTT reconnect attempt %d/%d", reconnect_attempt_count_, kMaxReconnectAttempts);
     if (!DoConnect()) {
         ScheduleReconnect();
     }
@@ -229,6 +240,8 @@ void MqttClient::AttachMqttCallbacks() {
     mqtt_->OnConnected([this]() {
         ESP_LOGI(TAG, "MQTT connected");
         connecting_ = false;
+        reconnect_attempt_count_ = 0;
+        reconnect_failed_ = false;
         StopReconnectTimer();
         SubscribeDefaultTopicIfNeeded();
         if (user_on_connected_) {
@@ -242,6 +255,8 @@ void MqttClient::AttachMqttCallbacks() {
             ESP_LOGI(TAG, "MQTT disconnected");
         }
         connecting_ = false;
+        reconnect_attempt_count_ = 0;
+        reconnect_failed_ = false;
         if (user_on_disconnected_) {
             user_on_disconnected_();
         }
@@ -476,6 +491,18 @@ void MqttClient::OnMessage(std::function<void(const std::string& topic, const st
     }
 }
 
+void MqttClient::OnReconnectFailed(std::function<void()> callback) {
+    user_on_reconnect_failed_ = std::move(callback);
+}
+
+void MqttClient::ResetReconnect() {
+    reconnect_attempt_count_ = 0;
+    reconnect_failed_ = false;
+    if (auto_reconnect_ && !IsConnected() && !connecting_) {
+        ScheduleReconnect();
+    }
+}
+
 int MqttClient::GetLastError() const {
     return last_error_;
 }
@@ -517,17 +544,21 @@ bool MqttClient::SendGetConfig(const std::string& request_id) {
     return PublishProtocolMessage("get_config", ResolveRequestId(this, request_id));
 }
 
-bool MqttClient::SendHeartBeat(const std::string& request_id) {
-    return PublishProtocolMessage("heart_beat", ResolveRequestId(this, request_id));
+bool MqttClient::SendHeartBeat(int battery_level, bool charging, const std::string& request_id) {
+    return PublishProtocolMessage("heart_beat", ResolveRequestId(this, request_id),
+                                  [battery_level, charging](cJSON* data) {
+                                      cJSON_AddNumberToObject(data, "battery_level", battery_level);
+                                      cJSON_AddBoolToObject(data, "charging", charging);
+                                  });
 }
 
 bool MqttClient::SendOtaUpdateState(int state, const std::string& desc, const std::string& request_id) {
     return PublishProtocolMessage("ota_update", ResolveRequestId(this, request_id),
                                   [state, &desc](cJSON* data) {
                                       cJSON_AddNumberToObject(data, "state", state);
-                                      cJSON_AddStringToObject(data, "desc", desc.c_str());
+                                      cJSON_AddStringToObject(data, "desc", desc.c_str());  
                                   });
-}
+} 
 
 bool MqttClient::SendVoiceState(int state, const std::string& request_id) {
     return PublishProtocolMessage("voice_state", ResolveRequestId(this, request_id),
@@ -561,6 +592,31 @@ bool MqttClient::SendPushUnbind(const std::string& request_id) {
     return PublishProtocolMessage("push_unbind", request_id);
 }
 
+bool MqttClient::SendRecordPcmState(const std::string& request_id) {
+    return PublishProtocolMessage("record_pcm", ResolveRequestId(this, request_id));
+}
+
+bool MqttClient::SendWifiInfo(const std::string& request_id) {
+    const auto& ssid_list = SsidManager::GetInstance().GetSsidList();
+    return PublishProtocolMessage("wifi_info", ResolveRequestId(this, request_id),
+                                  [&ssid_list](cJSON* data) {
+                                      cJSON_AddNumberToObject(data, "count", static_cast<int>(ssid_list.size()));
+                                      cJSON* wifi_list = cJSON_CreateArray();
+                                      if (wifi_list == nullptr) {
+                                          return;
+                                      }
+                                      for (int i = 0; i < static_cast<int>(ssid_list.size()); i++) {
+                                          cJSON* item = cJSON_CreateObject();
+                                          cJSON_AddNumberToObject(item, "index", i);
+                                          cJSON_AddStringToObject(item, "ssid", ssid_list[i].ssid.c_str());
+                                          cJSON_AddStringToObject(item, "pwd", ssid_list[i].password.c_str());
+                                          cJSON_AddItemToArray(wifi_list, item);
+                                          ESP_LOGI(TAG, "wifi_info: add ssid index=%d ssid=%s", i, ssid_list[i].ssid.c_str());
+                                      }
+                                      cJSON_AddItemToObject(data, "wifi_list", wifi_list);
+                                  });
+}
+
 void MqttClient::OnOtaUpdateOffer(
     std::function<void(const std::string& request_id, const std::string& code, const MqttOtaUpdateOffer& offer)>
         callback) {
@@ -587,6 +643,11 @@ void MqttClient::OnSetWakeWord(std::function<void(const std::string& request_id,
 void MqttClient::OnPushUnbind(
     std::function<void(const std::string& request_id, const std::string& device_id)> callback) {
     user_on_push_unbind_ = std::move(callback);
+}
+
+void MqttClient::OnRecordPcm(
+    std::function<void(const std::string& request_id, const MqttRecordPcmCommand& command)> callback) {
+    user_on_record_pcm_ = std::move(callback);
 }
 
 bool MqttClient::IsDuplicateIncomingMessage(const std::string& msg_type, const std::string& request_id) {
@@ -711,6 +772,58 @@ void MqttClient::HandleIncomingPayload(const std::string& payload) {
         }
         const std::string device_id = JsonOptString(root.get(), "device_id");
         user_on_push_unbind_(request_id, device_id);
+        return;
+    }
+
+    if (msg_type == "record_pcm") {
+        if (!user_on_record_pcm_) {
+            return;
+        }
+        MqttRecordPcmCommand cmd;
+        cJSON* data = cJSON_GetObjectItem(root.get(), "data");
+        if (cJSON_IsObject(data)) {
+            cmd.udp_ip = JsonOptString(data, "udp_ip");
+            cmd.port = JsonOptInt(data, "port", 0);
+            cmd.capture = JsonBool(cJSON_GetObjectItem(data, "capture"), false);
+        }
+        user_on_record_pcm_(request_id, cmd);
+        return;
+    }
+
+    if (msg_type == "wifi_update") {
+        cJSON* data = cJSON_GetObjectItem(root.get(), "data");
+        if (!cJSON_IsObject(data)) {
+            return;
+        }
+        cJSON* wifi_list = cJSON_GetObjectItem(data, "wifi_list");
+        if (!cJSON_IsArray(wifi_list)) {
+            return;
+        }
+        // 收集所有条目，按 index 排序
+        struct WifiEntry {
+            int index;
+            std::string ssid;
+            std::string password;
+        };
+        std::vector<WifiEntry> entries;
+        cJSON* item = nullptr;
+        cJSON_ArrayForEach(item, wifi_list) {
+            WifiEntry entry;
+            entry.index = JsonOptInt(item, "index", -1);
+            entry.ssid = JsonOptString(item, "ssid");
+            entry.password = JsonOptString(item, "pwd");
+            if (entry.index >= 0 && !entry.ssid.empty()) {
+                entries.push_back(std::move(entry));
+            }
+        }
+        // 先清空，再按 index 升序添加（AddSsid 插入到头部，所以降序添加保证 index 0 在最前）
+        SsidManager::GetInstance().Clear();
+        sort(entries.begin(), entries.end(),
+             [](const WifiEntry& a, const WifiEntry& b) { return a.index > b.index; });
+        for (const auto& entry : entries) {
+            SsidManager::GetInstance().AddSsid(entry.ssid, entry.password);
+            ESP_LOGI(TAG, "wifi_update: add ssid index=%d ssid=%s", entry.index, entry.ssid.c_str());
+        }
         return;
     }
 }

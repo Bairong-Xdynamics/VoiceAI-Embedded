@@ -85,7 +85,7 @@ void WifiConfigurationAp::Start()
                                                         &instance_got_ip_));
 
     StartAccessPoint();
-    StartWebServer();
+    //StartWebServer();
     
     // Start scan immediately
     esp_wifi_scan_start(nullptr, false);

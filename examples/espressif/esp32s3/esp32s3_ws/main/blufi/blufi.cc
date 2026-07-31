@@ -1,5 +1,6 @@
 #include "blufi.h"
 
+#include <algorithm>
 #include <cctype>
 #include <cinttypes>
 #include <cstdio>
@@ -7,8 +8,11 @@
 
 #include <string>
 
+#include <esp_timer.h>
+
 #include "application.h"
 #include "system_info.h"
+#include "wifi_configuration_ap.h"
 
 #if CONFIG_BT_CONTROLLER_ENABLED || !CONFIG_BT_NIMBLE_ENABLED
 #include <esp_bt.h>
@@ -207,6 +211,25 @@ void Blufi::OnBlufiEvent(esp_blufi_cb_event_t event, esp_blufi_cb_param_t* param
         ble_connected_ = true;
         esp_blufi_adv_stop();
         blufi_security_init();
+        /*
+        // 模拟：连接成功后延迟 2s 主动触发 WiFi 扫描（等待安全协商完成）
+        {
+            esp_timer_create_args_t timer_args = {
+                .callback = [](void* arg) {
+                    auto* blufi = static_cast<Blufi*>(arg);
+                    ESP_LOGI(BLU_WIFI_TAG, "BLE connect: sending cached WiFi list");
+                    blufi->SendCachedWifiList();
+                },
+                .arg = this,
+                .dispatch_method = ESP_TIMER_TASK,
+                .name = "blufi_scan",
+                .skip_unhandled_events = true,
+            };
+            esp_timer_handle_t scan_timer = nullptr;
+            esp_timer_create(&timer_args, &scan_timer);
+            esp_timer_start_once(scan_timer, 2 * 1000 * 1000);
+        }
+        */
         break;
     case ESP_BLUFI_EVENT_BLE_DISCONNECT:
         ESP_LOGI(BLU_WIFI_TAG, "BLUFI ble disconnect");
@@ -293,6 +316,7 @@ void Blufi::OnBlufiEvent(esp_blufi_cb_event_t event, esp_blufi_cb_param_t* param
     }
     case ESP_BLUFI_EVENT_GET_WIFI_LIST:
         ESP_LOGI(BLU_WIFI_TAG, "BLUFI get wifi list");
+        SendCachedWifiList();
         break;
     case ESP_BLUFI_EVENT_RECV_CUSTOM_DATA: {
         const uint8_t* const payload = param->custom_data.data;
@@ -348,4 +372,52 @@ esp_err_t Blufi::Init() {
 
     ESP_LOGI(BLU_WIFI_TAG, "BLUFI VERSION %04x", esp_blufi_get_version());
     return ESP_OK;
+}
+
+void Blufi::SendCachedWifiList() {
+    auto& wifi_ap = WifiConfigurationAp::GetInstance();
+    auto ap_records = wifi_ap.GetAccessPoints();
+
+    if (ap_records.empty()) {
+        ESP_LOGI(BLU_WIFI_TAG, "No cached AP results from WifiConfigurationAp");
+        return;
+    }
+
+    // 按 RSSI 降序排列
+    std::sort(ap_records.begin(), ap_records.end(),
+              [](const wifi_ap_record_t& a, const wifi_ap_record_t& b) { return a.rssi > b.rssi; });
+
+    // 过滤：仅上报 authmode >= 阈值的 AP
+    uint16_t valid_num = 0;
+    for (uint16_t i = 0; i < ap_records.size(); i++) {
+        if (ap_records[i].authmode >= BLU_WIFI_SCAN_AUTH_MODE_THRESHOLD) {
+            if (valid_num != i) {
+                ap_records[valid_num] = ap_records[i];
+            }
+            valid_num++;
+        }
+    }
+
+    if (valid_num == 0) {
+        ESP_LOGI(BLU_WIFI_TAG, "No AP matches authmode threshold");
+        return;
+    }
+
+    ESP_LOGI(BLU_WIFI_TAG, "Sending WiFi list: total=%d valid=%d", ap_records.size(), valid_num);
+    for (uint16_t i = 0; i < valid_num; i++) {
+        ESP_LOGI(BLU_WIFI_TAG, "  AP[%d]: SSID=%s RSSI=%d Auth=%d",
+                 i, ap_records[i].ssid, ap_records[i].rssi, ap_records[i].authmode);
+    }
+
+    // 转换为 esp_blufi_ap_record_t 格式
+    auto* blufi_records = static_cast<esp_blufi_ap_record_t*>(
+        malloc(valid_num * sizeof(esp_blufi_ap_record_t)));
+    if (blufi_records != nullptr) {
+        for (uint16_t i = 0; i < valid_num; i++) {
+            memcpy(blufi_records[i].ssid, ap_records[i].ssid, sizeof(blufi_records[i].ssid));
+            blufi_records[i].rssi = ap_records[i].rssi;
+        }
+        esp_blufi_send_wifi_list(valid_num, blufi_records);
+        free(blufi_records);
+    }
 }

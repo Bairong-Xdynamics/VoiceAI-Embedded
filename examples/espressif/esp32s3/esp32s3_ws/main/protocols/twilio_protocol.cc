@@ -360,9 +360,10 @@ void TwilioProtocol::ParseTwilioMedia(const cJSON* root)
 
     auto media = cJSON_GetObjectItem(root, "media");
     if (media == nullptr) {
-        if(on_incoming_json_ != nullptr) {
-            //ESP_LOGI(TAG, "🔊 received json: %s", cJSON_PrintUnformatted(root));
-            on_incoming_json_(root);
+        media = cJSON_GetObjectItem(root, "message");
+        if(media && on_incoming_json_ != nullptr) {
+            //ESP_LOGI(TAG, "🔊 received json: %s", cJSON_PrintUnformatted(media));
+            on_incoming_json_(media);
         }
         return;
     }

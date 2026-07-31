@@ -21,6 +21,9 @@ public:
     bool IsBleConnected() const { return ble_connected_; }
     const wifi_config_t& GetStaConfig() const { return sta_config_; }
 
+    /** 从 WifiConfigurationAp 缓存中获取扫描结果，过滤并上报。 */
+    void SendCachedWifiList();
+
 private:
     Blufi();
     static void EventCallback(esp_blufi_cb_event_t event, esp_blufi_cb_param_t* param);

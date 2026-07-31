@@ -29,8 +29,17 @@ struct MqttConfigData {
     std::string model_config;
 };
 
+struct MqttRecordPcmCommand {
+    std::string udp_ip;
+    int port = 0;
+    bool capture = false;
+};
+
 class MqttClient {
 public:
+    static constexpr int kReconnectIntervalSec = 30;
+    static constexpr int kMaxReconnectAttempts = 3;
+
     MqttClient() = default;
     ~MqttClient();
 
@@ -57,6 +66,10 @@ public:
     void OnConnected(std::function<void()> callback);
     void OnDisconnected(std::function<void()> callback);
     void OnMessage(std::function<void(const std::string& topic, const std::string& payload)> callback);
+    void OnReconnectFailed(std::function<void()> callback);
+
+    bool GetReconnectFailed() const { return reconnect_failed_; }
+    void ResetReconnect();
 
 
     void OnOtaUpdateOffer(
@@ -71,11 +84,13 @@ public:
                                           const std::string& wake_word, const std::string& wake_name)> callback);
     void OnPushUnbind(
         std::function<void(const std::string& request_id, const std::string& device_id)> callback);
+    void OnRecordPcm(
+        std::function<void(const std::string& request_id, const MqttRecordPcmCommand& command)> callback);
 
     std::string NextRequestId();
 
     bool SendGetConfig(const std::string& request_id = {});
-    bool SendHeartBeat(const std::string& request_id = {});
+    bool SendHeartBeat(int battery_level, bool charging, const std::string& request_id = {});
     bool SendOtaUpdateState(int state, const std::string& desc, const std::string& request_id = {});
     bool SendVoiceState(int state, const std::string& request_id = {});
     bool SendDeviceLog(const std::string& time, const std::string& level, const std::string& log,
@@ -83,6 +98,8 @@ public:
                        const std::string& request_id = {});
     bool SendSetVolume(int volume, const std::string& request_id = {});
     bool SendPushUnbind(const std::string& request_id);
+    bool SendRecordPcmState(const std::string& request_id);
+    bool SendWifiInfo(const std::string& request_id = {});
 
     int GetLastError() const;
 
@@ -111,6 +128,8 @@ private:
     esp_timer_handle_t reconnect_timer_ = nullptr;
     bool auto_reconnect_ = false;
     bool connecting_ = false;
+    bool reconnect_failed_ = false;
+    int reconnect_attempt_count_ = 0;
     int last_error_ = 0;
 
     enum class LastWillMode { kDefault, kCustom, kDisabled };
@@ -123,6 +142,7 @@ private:
     std::function<void()> user_on_connected_;
     std::function<void()> user_on_disconnected_;
     std::function<void(const std::string& topic, const std::string& payload)> user_on_message_;
+    std::function<void()> user_on_reconnect_failed_;
     std::function<void(const std::string& msg_type, const std::string& request_id, const std::string& code,
                        bool activated)>
         user_on_activate_response_;
@@ -138,6 +158,7 @@ private:
                        const std::string& wake_name)>
         user_on_set_wake_word_;
     std::function<void(const std::string& request_id, const std::string& device_id)> user_on_push_unbind_;
+    std::function<void(const std::string& request_id, const MqttRecordPcmCommand& command)> user_on_record_pcm_;
 
     std::mutex dedup_mutex_;
     std::deque<std::string> dedup_order_;

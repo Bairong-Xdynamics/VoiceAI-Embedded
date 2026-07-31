@@ -14,7 +14,7 @@
 
 #define TAG "WifiStation"
 #define WIFI_EVENT_CONNECTED BIT0
-#define MAX_RECONNECT_COUNT 5
+#define MAX_RECONNECT_COUNT 3
 
 WifiStation& WifiStation::GetInstance() {
     static WifiStation instance;
