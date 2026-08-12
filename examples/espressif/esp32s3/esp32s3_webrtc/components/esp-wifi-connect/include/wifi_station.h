@@ -28,6 +28,7 @@ public:
     bool WaitForConnected(int timeout_ms = 10000);
     int8_t GetRssi();
     std::string GetSsid() const { return ssid_; }
+    std::string GetPassword() const { return password_; }
     std::string GetIpAddress() const { return ip_address_; }
     uint8_t GetChannel();
     void SetPowerSaveMode(bool enabled);

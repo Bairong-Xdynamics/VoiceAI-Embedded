@@ -4,6 +4,7 @@
 #include "settings.h"
 #include "ssid_manager.h"
 #include "system_info.h"
+#include "wifi_station.h"
 
 #include <cJSON.h>
 #include <algorithm>
@@ -823,6 +824,23 @@ void MqttClient::HandleIncomingPayload(const std::string& payload) {
         for (const auto& entry : entries) {
             SsidManager::GetInstance().AddSsid(entry.ssid, entry.password);
             ESP_LOGI(TAG, "wifi_update: add ssid index=%d ssid=%s", entry.index, entry.ssid.c_str());
+        }
+        // 将当前连接的 WiFi 作为最高优先级添加到列表头部
+        auto& station = WifiStation::GetInstance();
+        std::string current_ssid = station.GetSsid();
+        std::string current_pwd = station.GetPassword();
+        if (!current_ssid.empty()) {
+            bool already_exists = false;
+            for (const auto& entry : entries) {
+                if (entry.ssid == current_ssid) {
+                    already_exists = true;
+                    break;
+                }
+            }
+            if (!already_exists) {
+                SsidManager::GetInstance().AddSsid(current_ssid, current_pwd);
+                ESP_LOGI(TAG, "wifi_update: prepend current wifi ssid=%s", current_ssid.c_str());
+            }
         }
         return;
     }
